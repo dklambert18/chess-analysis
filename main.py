@@ -1,7 +1,6 @@
 import os
 import time
 import requests
-import chess
 import berserk
 from dotenv import load_dotenv
 from flask import Flask, jsonify
@@ -37,9 +36,9 @@ def export_game():
     latest_pgn = games_list[-1]["pgn"]
 
     try:
-        # Import to Lichess via berserk
-        imported_game = client.games.import_game(latest_pgn)
-        game_url = imported_game.get("url")
+        # berserk returns just the game ID string
+        game_id = client.games.import_game(latest_pgn)
+        game_url = f"https://lichess.org/{game_id}"
         return jsonify({"url": game_url})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
