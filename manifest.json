@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Chess.com to Lichess",
+  "version": "1.0",
+
+  "description": "Import your latest Chess.com game into Lichess analysis.",
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Import Latest Game"
+  },
+
+  "permissions": [
+    "storage"
+  ],
+
+  "host_permissions": [
+    "https://api.chess.com/*",
+    "https://lichess.org/*"
+  ]
+}
