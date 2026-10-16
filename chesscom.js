@@ -21,6 +21,13 @@ async function fetchGames(archiveUrl) {
   return (data.games || []).sort((a, b) => (b.end_time || 0) - (a.end_time || 0));
 }
 
+// Profile (avatar, name, title, join date) and current/best ratings per time control.
+async function fetchProfile(username) {
+  const base = `${CHESS_API}/${encodeURIComponent(username)}`;
+  const [profile, ratings] = await Promise.all([getJson(base), getJson(`${base}/stats`).catch(() => ({}))]);
+  return { profile, ratings };
+}
+
 function monthLabel(archiveUrl) {
   const [year, month] = archiveUrl.split('/').slice(-2);
   return new Date(Number(year), Number(month) - 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });

@@ -1,22 +1,28 @@
-// Stats dashboard. Data helpers come from chesscom.js, calculations from stats-calc.js.
-const MIN_GAMES = 5; // below this, a column or row is marked as "few games"
-const OPENINGS_SHOWN = 12;
-const HOUR_LABELS = ['12–3a', '3–6a', '6–9a', '9a–12p', '12–3p', '3–6p', '6–9p', '9p–12a'];
+// Stats page. Data helpers come from chesscom.js, calculations from stats-calc.js.
+const MIN_GAMES = 5; // below this, a bar or row is marked as "few games"
+const OPENINGS_SHOWN = 8;
+const HOUR_LABELS = ['12a', '3a', '6a', '9a', '12p', '3p', '6p', '9p'];
 const HOUR_NAMES = ['12am–3am', '3am–6am', '6am–9am', '9am–12pm', '12pm–3pm', '3pm–6pm', '6pm–9pm', '9pm–12am'];
-const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const RANGE_PHRASES = { 1: 'This month', 3: 'Over the last three months', 12: 'Over the last year', all: 'Since you joined' };
+const RATING_KINDS = [['chess_bullet', 'Bullet'], ['chess_blitz', 'Blitz'], ['chess_rapid', 'Rapid'], ['chess_daily', 'Daily']];
 
 const usernameInput = document.getElementById('username');
 const statusEl = document.getElementById('status');
 const dashboard = document.getElementById('dashboard');
-const titleEl = document.getElementById('title');
+const hero = document.getElementById('hero');
 const tooltip = document.getElementById('tooltip');
 
-const state = { username: '', archives: [], range: '3', timeClass: 'all', openingColor: 'white', showAllOpenings: false };
+const state = {
+  username: '', archives: [], range: '3', timeClass: 'all',
+  showAll: { white: false, black: false },
+};
 const monthCache = new Map(); // archive URL -> games
 let loadToken = 0; // ignores results from a load that a newer one replaced
+let lastGames = [];
 
-// ---------- small DOM helpers ----------
+// ---------- small helpers ----------
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -26,7 +32,14 @@ function el(tag, attrs = {}, ...children) {
     else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
     else node.setAttribute(key, value);
   }
-  node.append(...children.filter((c) => c !== null && c !== undefined));
+  node.append(...children.filter((c) => c !== null && c !== undefined && c !== false));
+  return node;
+}
+
+// "You won **985** games" -> text with <b> for the starred parts.
+function rich(tag, attrs, text) {
+  const node = el(tag, attrs);
+  text.split(/\*\*(.+?)\*\*/).forEach((part, i) => node.append(i % 2 ? el('b', {}, part) : part));
   return node;
 }
 
@@ -35,12 +48,14 @@ function setStatus(message, isError = false) {
   statusEl.classList.toggle('error', isError);
 }
 
+const fmt = (n) => n.toLocaleString();
 const pct = (record) => `${Math.round(winRate(record) * 100)}%`;
-const recordText = (r) => `${r.win} W · ${r.draw} D · ${r.loss} L`;
-const gamesText = (n) => `${n} game${n === 1 ? '' : 's'}`;
+const points = (a, b) => Math.round((winRate(a) - winRate(b)) * 100);
+const plural = (n, one, many = `${one}s`) => `${fmt(n)} ${n === 1 ? one : many}`;
+const recordText = (r) => `${fmt(r.win)} won · ${fmt(r.draw)} drawn · ${fmt(r.loss)} lost`;
 
 function tip(title, record) {
-  return `${title}\nWin rate ${pct(record)}\n${recordText(record)} (${gamesText(record.games)})`;
+  return `${title}\n${pct(record)} won · ${plural(record.games, 'game')}\n${recordText(record)}`;
 }
 
 // ---------- tooltip ----------
@@ -61,114 +76,58 @@ document.addEventListener('pointermove', (event) => {
 });
 document.addEventListener('pointerleave', () => { tooltip.style.display = 'none'; });
 
-// ---------- chart pieces ----------
+// ---------- building blocks ----------
 
-function legend() {
-  return el('div', { class: 'legend' },
-    el('span', { style: '--swatch: var(--win)' }, 'Win'),
-    el('span', { style: '--swatch: var(--draw)' }, 'Draw'),
-    el('span', { style: '--swatch: var(--loss)' }, 'Loss'));
+function sectionHead(title, withLegend = false) {
+  return el('div', { class: 'section-head' },
+    el('h2', {}, title), el('div', { class: 'line' }),
+    withLegend ? el('div', { class: 'legend' },
+      el('span', { style: '--swatch: var(--win)' }, 'Won'),
+      el('span', { style: '--swatch: var(--draw)' }, 'Drawn'),
+      el('span', { style: '--swatch: var(--loss)' }, 'Lost')) : null);
 }
 
-function resultBar(record, title, big = false) {
-  const bar = el('div', { class: `rbar${big ? ' big' : ''}`, 'data-tip': tip(title, record), role: 'img', 'aria-label': `${title}: ${recordText(record)}` });
+function resultBar(record, title, thick = false) {
+  const bar = el('div', { class: `rbar${thick ? ' thick' : ''}`, 'data-tip': tip(title, record), role: 'img', 'aria-label': `${title}: ${recordText(record)}` });
   for (const outcome of ['win', 'draw', 'loss']) {
     if (record[outcome]) bar.append(el('div', { class: `seg-${outcome}`, style: `flex: ${record[outcome]}` }));
   }
   return bar;
 }
 
-function resultRow(name, record) {
-  return el('div', { class: 'color-row' },
-    el('div', { class: 'name' }, name),
-    resultBar(record, name, true),
-    el('div', { class: 'pct' }, `${pct(record)} wins`, el('small', {}, recordText(record))));
+function dataTable(records, names) {
+  return el('details', {}, el('summary', {}, 'Show as table'),
+    el('table', {},
+      el('thead', {}, el('tr', {}, el('th', {}, ''), el('th', {}, 'Games'), el('th', {}, 'Won'), el('th', {}, 'Drawn'), el('th', {}, 'Lost'), el('th', {}, 'Win rate'))),
+      el('tbody', {}, ...records.map((r, i) => el('tr', {},
+        el('td', {}, names[i]), el('td', {}, fmt(r.games)), el('td', {}, fmt(r.win)), el('td', {}, fmt(r.draw)),
+        el('td', {}, fmt(r.loss)), el('td', {}, r.games ? pct(r) : '–'))))));
 }
 
-// Single-series column chart of win rate. Only the best bin gets a value label.
-function columnChart(records, labels, names) {
-  const wrap = el('div');
-  const cols = el('div', { class: 'cols' });
-  for (const value of [0, 50, 100]) {
-    cols.append(el('div', { class: 'gridline', style: `top: ${100 - value}%` }));
-    cols.append(el('div', { class: 'tick', style: `top: ${100 - value}%` }, `${value}%`));
-  }
+// Histogram of win rate. The best bin (with enough games) is highlighted and labeled.
+function histogram(records, labels, names) {
   const eligible = records.map((r, i) => ({ r, i })).filter(({ r }) => r.games >= MIN_GAMES);
-  const best = eligible.length ? eligible.reduce((a, b) => (winRate(b.r) > winRate(a.r) ? b : a)).i : -1;
+  const sorted = eligible.slice().sort((a, b) => winRate(b.r) - winRate(a.r));
+  const best = sorted[0]?.i ?? -1;
 
-  const bars = el('div', { class: 'bars' });
+  const hist = el('div', { class: 'hist' });
   records.forEach((record, i) => {
-    const height = winRate(record) * 100;
     const slot = el('div', { class: 'slot', 'data-tip': record.games ? tip(names[i], record) : `${names[i]}\nNo games` });
     if (record.games) {
-      slot.append(el('div', { class: `bar${record.games < MIN_GAMES ? ' few' : ''}`, style: `height: ${height}%` }));
+      const height = Math.max(winRate(record) * 100, 1);
+      const kind = record.games < MIN_GAMES ? ' few' : i === best ? ' top' : '';
+      slot.append(el('div', { class: `bar${kind}`, style: `height: ${height}%` }));
       if (i === best) slot.append(el('div', { class: 'cap', style: `bottom: ${height}%` }, pct(record)));
     }
-    bars.append(slot);
+    hist.append(slot);
   });
-  cols.append(bars);
-  wrap.append(cols, el('div', { class: 'cols-labels' }, ...labels.map((l) => el('span', {}, l))));
+
+  const wrap = el('div', {}, hist, el('div', { class: 'hist-labels' }, ...labels.map((l) => el('span', {}, l))));
   if (records.some((r) => r.games && r.games < MIN_GAMES)) {
-    wrap.append(el('div', { class: 'few-note' }, `Fewer than ${MIN_GAMES} games, so less reliable`));
+    wrap.append(el('div', { class: 'note' }, `Striped bars have fewer than ${MIN_GAMES} games, so take them with a grain of salt.`));
   }
   wrap.append(dataTable(records, names));
-  return wrap;
-}
-
-function dataTable(records, names) {
-  const body = el('tbody', {}, ...records.map((r, i) => el('tr', {},
-    el('td', {}, names[i]), el('td', { class: 'num' }, String(r.games)),
-    el('td', { class: 'num' }, recordText(r)), el('td', { class: 'num' }, r.games ? pct(r) : '–'))));
-  return el('details', {}, el('summary', {}, 'Show as table'),
-    el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, ''), el('th', { class: 'num' }, 'Games'),
-      el('th', { class: 'num' }, 'Record'), el('th', { class: 'num' }, 'Win rate'))), body));
-}
-
-function bestOf(records, names) {
-  const eligible = records.map((r, i) => ({ r, name: names[i] })).filter(({ r }) => r.games >= MIN_GAMES);
-  if (eligible.length < 2) return null;
-  const sorted = eligible.sort((a, b) => winRate(b.r) - winRate(a.r));
-  return { best: sorted[0], worst: sorted.at(-1) };
-}
-
-// ---------- sections ----------
-
-function tile(label, value, note) {
-  return el('div', { class: 'tile' }, el('div', { class: 'label' }, label), el('div', { class: 'value' }, value),
-    note ? el('div', { class: 'note' }, note) : null);
-}
-
-const STREAK_WORDS = { win: ['win', 'wins'], loss: ['loss', 'losses'], draw: ['draw', 'draws'] };
-
-function streakText(length, outcome) {
-  if (!length) return 'None';
-  const [one, many] = STREAK_WORDS[outcome];
-  return `${length} ${length === 1 ? one : many}`;
-}
-
-function tilesSection(stats) {
-  const { current, longestWin, longestLoss } = stats.streaks;
-  return el('div', { class: 'tiles' },
-    tile('Games', String(stats.record.games)),
-    tile('Win rate', pct(stats.record), recordText(stats.record)),
-    tile('Current streak', streakText(current.length, current.outcome)),
-    tile('Longest win streak', streakText(longestWin, 'win')),
-    tile('Longest losing streak', streakText(longestLoss, 'loss')));
-}
-
-function colorSection(stats) {
-  const { white, black } = stats.byColor;
-  let insight = null;
-  if (white.games >= MIN_GAMES && black.games >= MIN_GAMES) {
-    const diff = Math.round((winRate(white) - winRate(black)) * 100);
-    insight = Math.abs(diff) < 3
-      ? 'You do about equally well with both colors.'
-      : `You win ${Math.abs(diff)} points more often as ${diff > 0 ? 'White' : 'Black'}.`;
-  }
-  return el('section', { class: 'card' },
-    el('h2', {}, 'White vs Black'), el('p', { class: 'sub' }, 'Your results with each color'),
-    legend(), resultRow('White', white), resultRow('Black', black),
-    insight ? el('p', { class: 'insight' }, insight) : null);
+  return { node: wrap, best: sorted[0], worst: sorted.at(-1), comparable: sorted.length >= 2 };
 }
 
 // "Sicilian Defense Najdorf" under "Sicilian Defense" -> "Najdorf". Also handles merged
@@ -182,76 +141,157 @@ function variationLabel(variation, family) {
   return variation;
 }
 
-function openingsSection(stats) {
-  const color = state.openingColor;
-  const families = stats.openings[color];
-  const shown = state.showAllOpenings ? families : families.slice(0, OPENINGS_SHOWN);
+// ---------- sections ----------
 
-  const toggle = el('div', { class: 'seg', style: 'margin-bottom: 12px' },
-    ...['white', 'black'].map((c) => el('button', {
-      'aria-pressed': String(c === color),
-      onclick: () => { state.openingColor = c; state.showAllOpenings = false; render(); },
-    }, c === 'white' ? 'As White' : 'As Black')));
-
-  const body = el('tbody');
-  for (const family of shown) {
-    const row = el('tr', { class: 'family', title: 'Click to see variations' },
-      el('td', {}, family.name), el('td', { class: 'num' }, String(family.record.games)),
-      el('td', { class: 'results' }, resultBar(family.record, family.name)),
-      el('td', { class: 'num' }, family.record.games < MIN_GAMES ? `${pct(family.record)}*` : pct(family.record)));
-    const variationRows = family.variations.map((v) => el('tr', { class: 'variation', hidden: '' },
-      el('td', {}, variationLabel(v.name, family.name)), el('td', { class: 'num' }, String(v.record.games)),
-      el('td', { class: 'results' }, resultBar(v.record, v.name)), el('td', { class: 'num' }, pct(v.record))));
-    row.addEventListener('click', () => {
-      const open = row.classList.toggle('open');
-      variationRows.forEach((r) => { r.hidden = !open; });
-    });
-    body.append(row, ...variationRows);
+function renderHero({ profile, ratings }) {
+  const avatar = profile.avatar
+    ? el('img', { class: 'avatar', src: profile.avatar, alt: '' })
+    : el('img', { class: 'avatar pixel', src: 'icons/icon128.png', alt: '' });
+  const meta = el('div', { class: 'meta' }, el('span', {}, `@${profile.username}`));
+  if (profile.joined) meta.append(el('span', {}, `Joined ${new Date(profile.joined * 1000).getFullYear()}`));
+  for (const [key, label] of RATING_KINDS) {
+    const rating = ratings[key]?.last?.rating;
+    if (rating) meta.append(rich('span', {}, `${label} **${rating}**`));
   }
+  hero.replaceChildren(avatar, el('div', {},
+    el('h1', {}, profile.title ? el('span', { class: 'title-badge' }, profile.title) : null, profile.name || profile.username),
+    meta));
+  hero.hidden = false;
+}
 
-  const section = el('section', { class: 'card' },
-    el('h2', {}, 'Openings'),
-    el('p', { class: 'sub' }, 'Win rate by opening. Click an opening to see its variations. * fewer than 5 games'),
-    toggle, legend());
+function overview(stats) {
+  const { record, streaks } = stats;
+  const games = state.timeClass === 'all' ? 'games' : `${state.timeClass} games`;
+  const current = streaks.current;
+  const currentValue = current.outcome === 'win' ? current.length : 0;
+
+  let lede = `${RANGE_PHRASES[state.range]} you played **${fmt(record.games)}** ${games}, won **${fmt(record.win)}** and lost **${fmt(record.loss)}**.`;
+  if (streaks.longestWin >= 3) lede += ` Your best run was **${streaks.longestWin} wins in a row**.`;
+  if (current.outcome === 'win' && current.length >= 2) lede += ` You're on a ${current.length}-game winning streak right now.`;
+  if (current.outcome === 'loss' && current.length >= 3) lede += ` You've lost your last ${current.length}, so maybe take a breather.`;
+
+  return el('div', {},
+    el('div', { class: 'numbers' },
+      number(fmt(record.games), state.timeClass === 'all' ? 'Games' : `${state.timeClass} games`),
+      number(pct(record), 'Won'),
+      number(String(streaks.longestWin), 'Longest win streak'),
+      number(String(currentValue), 'Current win streak')),
+    rich('p', { class: 'lede' }, lede));
+}
+
+function number(value, label) {
+  return el('div', { class: 'number' }, el('div', { class: 'value' }, value), el('div', { class: 'label' }, label));
+}
+
+function colorsSection(stats) {
+  const { white, black } = stats.byColor;
+  const side = (name, record) => el('div', { class: 'side' },
+    el('h3', {}, `With ${name}`),
+    el('div', { class: 'big' }, pct(record), el('small', {}, 'won')),
+    resultBar(record, `With ${name}`, true),
+    el('div', { class: 'record' }, `${recordText(record)} · ${plural(record.games, 'game')}`));
+
+  let prose = null;
+  if (white.games >= MIN_GAMES && black.games >= MIN_GAMES) {
+    const diff = points(white, black);
+    prose = Math.abs(diff) < 3
+      ? 'You win about as often with either color. Nicely balanced.'
+      : `You win **${Math.abs(diff)} points more often with ${diff > 0 ? 'White' : 'Black'}**. Your ${diff > 0 ? 'Black' : 'White'} repertoire might be worth a look.`;
+  }
+  return el('section', {}, sectionHead('White & Black', true),
+    el('div', { class: 'two' }, side('White', white), side('Black', black)),
+    prose ? rich('p', { class: 'prose' }, prose) : null);
+}
+
+function openingList(color, families) {
+  const shown = state.showAll[color] ? families : families.slice(0, OPENINGS_SHOWN);
+  const column = el('div', {},
+    el('h3', {}, `With ${color === 'white' ? 'White' : 'Black'}`),
+    el('p', { class: 'sub' }, `${plural(families.length, 'opening')} · click one to see its lines`));
   if (!families.length) {
-    section.append(el('p', { class: 'empty' }, `No games as ${color} in this range.`));
-    return section;
+    column.append(el('p', { class: 'empty' }, `No games with ${color} in this range.`));
+    return column;
   }
-  section.append(el('table', {},
-    el('thead', {}, el('tr', {}, el('th', {}, 'Opening'), el('th', { class: 'num' }, 'Games'),
-      el('th', {}, 'Results'), el('th', { class: 'num' }, 'Win rate'))), body));
+
+  const list = el('ol', { class: 'ranked' });
+  shown.forEach((family, i) => {
+    const variations = el('ul', { class: 'variations', hidden: '' }, ...family.variations.map((v) => el('li', {},
+      el('div', {}, variationLabel(v.name, family.name), ' ', el('span', { class: 'count' }, `· ${v.record.games}`)),
+      resultBar(v.record, v.name),
+      el('div', { class: 'pct' }, pct(v.record)))));
+    const few = family.record.games < MIN_GAMES;
+    const row = el('div', { class: 'rank-row', role: 'button', tabindex: '0', 'aria-expanded': 'false' },
+      el('div', { class: 'rank' }, String(i + 1)),
+      el('div', {}, el('div', { class: 'name' }, family.name), el('div', { class: 'count' }, plural(family.record.games, 'game'))),
+      resultBar(family.record, family.name),
+      el('div', { class: `pct${few ? ' few' : ''}`, title: few ? `Only ${family.record.games} games` : '' }, pct(family.record)));
+    const toggle = () => {
+      variations.hidden = !variations.hidden;
+      row.setAttribute('aria-expanded', String(!variations.hidden));
+    };
+    row.addEventListener('click', toggle);
+    row.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); } });
+    list.append(el('li', {}, row, variations));
+  });
+  column.append(list);
+
   if (families.length > OPENINGS_SHOWN) {
-    section.append(el('button', {
-      class: 'more',
-      onclick: () => { state.showAllOpenings = !state.showAllOpenings; render(); },
-    }, state.showAllOpenings ? 'Show fewer' : `Show all ${families.length} openings`));
+    column.append(el('button', {
+      class: 'link',
+      onclick: () => { state.showAll[color] = !state.showAll[color]; render(); },
+    }, state.showAll[color] ? 'Show fewer' : `All ${families.length} openings ↓`));
   }
-  return section;
+  return column;
 }
 
-function timeSection(title, sub, records, labels, names) {
-  const extremes = bestOf(records, names);
-  return el('section', { class: 'card' },
-    el('h2', {}, title), el('p', { class: 'sub' }, sub),
-    columnChart(records, labels, names),
-    extremes && winRate(extremes.best.r) - winRate(extremes.worst.r) >= 0.05
-      ? el('p', { class: 'insight' }, `Best: ${extremes.best.name} (${pct(extremes.best.r)}). Worst: ${extremes.worst.name} (${pct(extremes.worst.r)}).`)
-      : null);
+function openingsSection(stats) {
+  // Best opening with a decent sample, across both colors.
+  const candidates = [...stats.openings.white.map((o) => ({ ...o, color: 'White' })), ...stats.openings.black.map((o) => ({ ...o, color: 'Black' }))]
+    .filter((o) => o.record.games >= 10);
+  let prose = null;
+  if (candidates.length >= 2) {
+    const sorted = candidates.sort((a, b) => winRate(b.record) - winRate(a.record));
+    const best = sorted[0];
+    const worst = sorted.at(-1);
+    prose = `Your best weapon is the **${best.name}** with ${best.color}, winning ${pct(best.record)} of ${best.record.games} games. `
+      + `The **${worst.name}** with ${worst.color} is giving you the most trouble at ${pct(worst.record)}.`;
+  }
+  return el('section', {}, sectionHead('Openings', true),
+    el('div', { class: 'two' }, openingList('white', stats.openings.white), openingList('black', stats.openings.black)),
+    prose ? rich('p', { class: 'prose' }, prose) : null);
 }
 
-function momentumSection(stats) {
+function whenSection(stats) {
+  const hours = histogram(stats.byHourBlock, HOUR_LABELS, HOUR_NAMES);
+  const days = histogram(stats.byWeekday, DAY_LABELS, DAY_NAMES);
+  const sentences = [];
+  if (hours.comparable && points(hours.best.r, hours.worst.r) >= 5) {
+    sentences.push(`You're sharpest between **${HOUR_NAMES[hours.best.i]}** and shakiest between **${HOUR_NAMES[hours.worst.i]}**.`);
+  }
+  if (days.comparable && points(days.best.r, days.worst.r) >= 5) {
+    sentences.push(`**${DAY_NAMES[days.best.i]}s** are your best day, and **${DAY_NAMES[days.worst.i]}s** your worst.`);
+  }
+  return el('section', {}, sectionHead('When you win'),
+    el('div', { class: 'two' },
+      el('div', {}, el('h3', {}, 'Time of day'), el('p', { class: 'sub' }, 'Win rate by start time, in your time zone'), hours.node),
+      el('div', {}, el('h3', {}, 'Day of the week'), el('p', { class: 'sub' }, 'Win rate by day'), days.node)),
+    sentences.length ? rich('p', { class: 'prose' }, sentences.join(' ')) : null);
+}
+
+function tiltSection(stats) {
   const { afterWin, afterLoss } = stats.momentum;
-  let insight = 'Not enough back-to-back games yet. This counts live games played within an hour of each other.';
+  let prose = 'Not enough back-to-back games yet. This looks at live games played within an hour of each other.';
   if (afterWin.games >= MIN_GAMES && afterLoss.games >= MIN_GAMES) {
-    const diff = Math.round((winRate(afterWin) - winRate(afterLoss)) * 100);
-    if (diff >= 5) insight = `You win ${diff} points less often right after a loss. Taking a short break after a loss might help.`;
-    else if (diff <= -5) insight = `You actually do better right after a loss, by ${-diff} points. Losses seem to sharpen you up.`;
-    else insight = 'A loss doesn\'t seem to affect your next game much. Nice and steady.';
+    const diff = points(afterWin, afterLoss);
+    if (diff >= 5) prose = `Right after a loss you win **${pct(afterLoss)}** of the time, **${diff} points lower** than after a win. A short break after a loss could save you some rating.`;
+    else if (diff <= -5) prose = `Losses fire you up: right after one you win **${pct(afterLoss)}** of the time, **${-diff} points better** than after a win.`;
+    else prose = `A loss barely affects your next game (**${pct(afterLoss)}** vs **${pct(afterWin)}** after a win). Ice in the veins.`;
   }
-  return el('section', { class: 'card momentum' },
-    el('h2', {}, 'Tilt check'), el('p', { class: 'sub' }, 'How you do in your next game, right after a win or a loss'),
-    legend(), resultRow('After a win', afterWin), resultRow('After a loss', afterLoss),
-    el('p', { class: 'insight' }, insight));
+  const row = (label, record) => el('div', { class: 'tilt-row' },
+    el('div', { class: 'label' }, label), resultBar(record, label, true), el('div', { class: 'pct' }, pct(record)));
+  return el('section', {}, sectionHead('Tilt check', true),
+    rich('p', { class: 'prose', style: 'margin: 0 0 20px' }, prose),
+    row('After a win', afterWin), row('After a loss', afterLoss));
 }
 
 // ---------- loading & rendering ----------
@@ -266,24 +306,15 @@ function archivesInRange() {
   });
 }
 
-let lastGames = [];
-
 function render() {
   const games = lastGames.filter((g) => g.rules === 'chess' && (state.timeClass === 'all' || g.time_class === state.timeClass));
   dashboard.replaceChildren();
   if (!games.length) {
-    dashboard.append(el('p', { class: 'empty' }, 'No games match these filters. Try a longer time range or a different time control.'));
+    dashboard.append(el('p', { class: 'lede' }, 'No games match these filters. Try a longer time range or a different time control.'));
     return;
   }
   const stats = computeStats(games, state.username);
-  dashboard.append(
-    tilesSection(stats),
-    colorSection(stats),
-    openingsSection(stats),
-    el('div', { class: 'grid2' },
-      timeSection('Time of day', 'Win rate by when the game started, in your time zone', stats.byHourBlock, HOUR_LABELS, HOUR_NAMES),
-      timeSection('Day of week', 'Win rate by day', stats.byWeekday, DAY_LABELS, DAY_NAMES)),
-    momentumSection(stats));
+  dashboard.append(overview(stats), colorsSection(stats), openingsSection(stats), whenSection(stats), tiltSection(stats));
 }
 
 async function loadGames() {
@@ -299,7 +330,7 @@ async function loadGames() {
     games.push(...monthCache.get(url));
   }
   lastGames = games;
-  setStatus(months.length ? `${games.length} games from ${months.length} month${months.length === 1 ? '' : 's'}.` : '');
+  setStatus('');
   render();
 }
 
@@ -309,13 +340,18 @@ async function loadUser(name) {
     setStatus('Enter your Chess.com username.', true);
     return;
   }
-  titleEl.textContent = `${state.username}'s chess stats`;
   monthCache.clear();
   lastGames = [];
   dashboard.replaceChildren();
+  hero.hidden = true;
   setStatus('Loading…');
   try {
-    state.archives = await fetchArchives(state.username);
+    const [archives, profile] = await Promise.all([
+      fetchArchives(state.username),
+      fetchProfile(state.username).catch(() => null), // the header is nice to have, not required
+    ]);
+    state.archives = archives;
+    if (profile) renderHero(profile);
     await chrome.storage.local.set({ chessUsername: state.username });
     if (!state.archives.length) {
       setStatus('No games found for this account.');
@@ -327,7 +363,7 @@ async function loadUser(name) {
   }
 }
 
-function wireSegment(id, key, onChange) {
+function wireTabs(id, key, onChange) {
   const group = document.getElementById(id);
   group.addEventListener('click', (event) => {
     const button = event.target.closest('button');
@@ -338,8 +374,8 @@ function wireSegment(id, key, onChange) {
   });
 }
 
-wireSegment('rangeFilter', 'range', () => loadGames().catch((error) => setStatus(error.message, true)));
-wireSegment('classFilter', 'timeClass', render);
+wireTabs('rangeFilter', 'range', () => loadGames().catch((error) => setStatus(error.message, true)));
+wireTabs('classFilter', 'timeClass', render);
 document.getElementById('userForm').addEventListener('submit', (event) => {
   event.preventDefault();
   loadUser(usernameInput.value);
