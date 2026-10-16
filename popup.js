@@ -14,9 +14,11 @@ const gamesList = document.getElementById('games');
 let archives = [];
 let currentTabGameId = null;
 
+const RESULT_LETTERS = { win: 'W', draw: 'D', loss: 'L' };
+
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
-  statusEl.style.color = isError ? '#b00020' : '';
+  statusEl.classList.toggle('error', isError);
 }
 
 function username() {
@@ -63,25 +65,32 @@ function renderGames(games) {
     const { opponent, outcome, isWhite } = describe(game, username());
     const li = document.createElement('li');
 
+    const result = document.createElement('div');
+    result.className = 'result';
+    result.style.setProperty('--swatch', `var(--${outcome})`);
+    result.textContent = RESULT_LETTERS[outcome];
+    result.title = outcome === 'win' ? 'Won' : outcome === 'loss' ? 'Lost' : 'Drawn';
+
     const info = document.createElement('div');
-    info.className = 'info';
+    info.style.minWidth = '0';
     const name = document.createElement('div');
     name.className = 'opponent';
-    name.textContent = `vs ${opponent.username} (${opponent.rating})`;
+    const rating = document.createElement('span');
+    rating.className = 'rating';
+    rating.textContent = opponent.rating;
+    name.append(`vs ${opponent.username}`, rating);
     const meta = document.createElement('div');
     meta.className = 'meta';
-    const result = document.createElement('span');
-    result.className = outcome;
-    result.textContent = outcome.toUpperCase();
-    const date = new Date(game.end_time * 1000).toLocaleDateString();
-    meta.append(result, ` · ${isWhite ? 'White' : 'Black'} · ${game.time_class} · ${date}`);
+    const date = new Date(game.end_time * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    meta.textContent = `${isWhite ? 'White' : 'Black'} · ${game.time_class} · ${date}`;
     info.append(name, meta);
 
     const button = document.createElement('button');
+    button.className = 'text-btn';
     button.textContent = 'Analyze';
     button.addEventListener('click', () => analyze(game, button));
 
-    li.append(info, button);
+    li.append(result, info, button);
     gamesList.append(li);
   }
 }
