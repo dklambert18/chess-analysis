@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess Stats</title>
+  <link rel="icon" href="icons/icon32.png">
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f9f9f7;
+      --surface: #fcfcfb;
+      --text-primary: #0b0b0b;
+      --text-secondary: #52514e;
+      --text-muted: #898781;
+      --grid: #e1e0d9;
+      --baseline: #c3c2b7;
+      --border: rgba(11, 11, 11, 0.10);
+      --hover: rgba(11, 11, 11, 0.04);
+      --win: #2a78d6;
+      --draw: #a3a29b;
+      --loss: #e34948;
+      --few: #86b6ef; /* lighter step of the win hue, for low-sample columns */
+      --error: #b00020;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --page: #0d0d0d;
+        --surface: #1a1a19;
+        --text-primary: #f0efec;
+        --text-secondary: #c3c2b7;
+        --text-muted: #898781;
+        --grid: #2c2c2a;
+        --baseline: #383835;
+        --border: rgba(255, 255, 255, 0.10);
+        --hover: rgba(255, 255, 255, 0.05);
+        --win: #3987e5;
+        --draw: #5e5d58;
+        --loss: #e66767;
+        --few: #184f95;
+        --error: #ff6b7a;
+      }
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --hover: rgba(255, 255, 255, 0.05);
+      --win: #3987e5;
+      --draw: #5e5d58;
+      --loss: #e66767;
+      --few: #184f95;
+      --error: #ff6b7a;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--page); color: var(--text-primary);
+      font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+    header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+    header img { width: 40px; height: 40px; image-rendering: pixelated; }
+    h1 { font-size: 22px; margin: 0; flex: 1; min-width: 200px; }
+    h2 { font-size: 15px; margin: 0 0 2px; }
+    .sub { color: var(--text-secondary); font-size: 12px; margin: 0 0 14px; }
+    input, button, select { font: inherit; color: inherit; }
+    .user { display: flex; gap: 6px; }
+    .user input { padding: 6px 8px; width: 180px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+    button { cursor: pointer; padding: 6px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+    button:hover { background: var(--hover); }
+
+    .filters { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+    .seg button { border: 0; border-radius: 0; padding: 6px 12px; }
+    .seg button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface); }
+    .filter-label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+
+    #status { min-height: 20px; color: var(--text-secondary); margin: 0 0 12px; }
+    #status.error { color: var(--error); }
+
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid2 > .card { margin-bottom: 0; }
+    .grid2 + .card, .grid2 + .grid2 { margin-top: 16px; }
+    @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+    .tile .label { font-size: 12px; color: var(--text-secondary); }
+    .tile .value { font-size: 24px; font-weight: 600; margin-top: 2px; }
+    .tile .note { font-size: 12px; color: var(--text-muted); }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+    .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: var(--swatch); }
+
+    /* Win/draw/loss stacked bar: 2px surface gap between segments, 4px rounded ends. */
+    .rbar { display: flex; gap: 2px; height: 14px; min-width: 60px; }
+    .rbar.big { height: 22px; }
+    .rbar div { min-width: 2px; }
+    .rbar div:first-child { border-radius: 4px 0 0 4px; }
+    .rbar div:last-child { border-radius: 0 4px 4px 0; }
+    .rbar div:only-child { border-radius: 4px; }
+    .seg-win { background: var(--win); } .seg-draw { background: var(--draw); } .seg-loss { background: var(--loss); }
+
+    .color-row { display: grid; grid-template-columns: 56px 1fr 120px; align-items: center; gap: 12px; padding: 8px 0; }
+    .color-row .name { font-weight: 600; }
+    .color-row .pct { text-align: right; font-variant-numeric: tabular-nums; }
+    .color-row .pct small { display: block; color: var(--text-muted); font-size: 11px; }
+
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th { text-align: left; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+    th.num, td.num { text-align: right; }
+    td { padding: 7px 8px; border-bottom: 1px solid var(--grid); }
+    td.results { width: 34%; }
+    tr.family { cursor: pointer; }
+    tr.family:hover td { background: var(--hover); }
+    tr.family td:first-child::before { content: "▸"; display: inline-block; width: 14px; color: var(--text-muted); transition: transform .15s; }
+    tr.family.open td:first-child::before { transform: rotate(90deg); }
+    tr.variation td { font-size: 12px; color: var(--text-secondary); }
+    tr.variation td:first-child { padding-left: 30px; }
+    .more { margin-top: 10px; }
+
+    /* Column chart */
+    .cols { position: relative; height: 180px; margin: 26px 0 0 34px; border-bottom: 1px solid var(--baseline); }
+    .cols .gridline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--grid); }
+    .cols .tick { position: absolute; left: -34px; width: 28px; text-align: right; font-size: 11px; color: var(--text-muted); transform: translateY(-50%); }
+    .cols .bars { position: absolute; inset: 0; display: flex; }
+    .cols .slot { flex: 1; position: relative; display: flex; justify-content: center; align-items: flex-end; }
+    .cols .slot:hover { background: var(--hover); }
+    .cols .bar { width: 24px; max-width: 70%; background: var(--win); border-radius: 4px 4px 0 0; }
+    .cols .bar.few { background: var(--few); }
+    .cols .cap { position: absolute; font-size: 11px; font-weight: 600; color: var(--text-primary); transform: translateY(-100%); padding-bottom: 2px; }
+    .cols-labels { display: flex; margin-left: 34px; }
+    .cols-labels span { flex: 1; text-align: center; font-size: 11px; color: var(--text-muted); padding-top: 4px; }
+    .few-note { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+    .few-note::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: var(--few); }
+    details { margin-top: 10px; font-size: 12px; }
+    summary { cursor: pointer; color: var(--text-secondary); }
+    details table { margin-top: 6px; }
+
+    .momentum .color-row { grid-template-columns: 110px 1fr 120px; }
+    .insight { font-size: 13px; color: var(--text-secondary); margin: 10px 0 0; }
+
+    #tooltip {
+      position: fixed; pointer-events: none; z-index: 10; display: none; white-space: pre-line;
+      background: var(--text-primary); color: var(--surface); font-size: 12px; padding: 6px 9px; border-radius: 6px; max-width: 260px;
+    }
+    .empty { color: var(--text-secondary); padding: 24px 0; text-align: center; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <img src="icons/icon128.png" alt="">
+      <h1 id="title">Your chess stats</h1>
+      <form class="user" id="userForm">
+        <input id="username" placeholder="Chess.com username" aria-label="Chess.com username" autocomplete="username">
+        <button type="submit">Load</button>
+      </form>
+    </header>
+
+    <div class="filters">
+      <div>
+        <span class="filter-label">Time range</span>
+        <div class="seg" id="rangeFilter">
+          <button data-value="1">This month</button>
+          <button data-value="3" aria-pressed="true">3 months</button>
+          <button data-value="12">12 months</button>
+          <button data-value="all">All time</button>
+        </div>
+      </div>
+      <div>
+        <span class="filter-label">Time control</span>
+        <div class="seg" id="classFilter">
+          <button data-value="all" aria-pressed="true">All</button>
+          <button data-value="bullet">Bullet</button>
+          <button data-value="blitz">Blitz</button>
+          <button data-value="rapid">Rapid</button>
+          <button data-value="daily">Daily</button>
+        </div>
+      </div>
+    </div>
+
+    <p id="status" role="status"></p>
+    <div id="dashboard"></div>
+  </main>
+  <div id="tooltip" role="tooltip"></div>
+  <script src="chesscom.js"></script>
+  <script src="stats-calc.js"></script>
+  <script src="stats.js"></script>
+</body>
+</html>

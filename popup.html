@@ -12,6 +12,7 @@
     .row input, .row select { flex: 1; min-width: 0; }
     button { cursor: pointer; }
     #currentGame { width: 100%; margin-top: 10px; display: none; }
+    #statsBtn { width: 100%; margin-top: 8px; }
     #status { min-height: 18px; font-size: 12px; line-height: 1.35; }
     #games { list-style: none; margin: 8px 0 0; padding: 0; max-height: 340px; overflow-y: auto; }
     #games li { display: flex; align-items: center; gap: 8px; padding: 6px 2px; border-bottom: 1px solid #ddd; }
@@ -29,10 +30,12 @@
     <button id="loadBtn">Load</button>
   </div>
   <button id="currentGame">Analyze the game in this tab</button>
+  <button id="statsBtn">View my stats</button>
   <label for="month">Month</label>
   <select id="month" disabled style="width: 100%"></select>
   <p id="status" role="status"></p>
   <ul id="games"></ul>
+  <script src="chesscom.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
