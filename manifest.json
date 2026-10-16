@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "chess.com --> Lichess",
-  "version": "2.0",
+  "version": "2.1",
 
-  "description": "Send any of your Chess.com games to Lichess for free analysis.",
+  "description": "Analyze your Chess.com games on Lichess for free, and see stats on your openings, colors and streaks.",
 
   "icons": {
     "16": "icons/icon16.png",

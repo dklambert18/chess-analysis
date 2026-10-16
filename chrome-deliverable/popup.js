@@ -1,11 +1,11 @@
-const CHESS_API = 'https://api.chess.com/pub/player';
+// CHESS_API, getJson, fetchArchives, fetchGames, monthLabel and describe come from chesscom.js.
 const LICHESS_IMPORT = 'https://lichess.org/api/import';
 // How many months back to look when finding the game open in the current tab.
 const MAX_MONTHS_TO_SEARCH = 12;
-const DRAW_RESULTS = new Set(['agreed', 'repetition', 'stalemate', 'insufficient', '50move', 'timevsinsufficient']);
 
 const usernameInput = document.getElementById('chessUsername');
 const loadBtn = document.getElementById('loadBtn');
+const statsBtn = document.getElementById('statsBtn');
 const monthSelect = document.getElementById('month');
 const currentGameBtn = document.getElementById('currentGame');
 const statusEl = document.getElementById('status');
@@ -14,48 +14,15 @@ const gamesList = document.getElementById('games');
 let archives = [];
 let currentTabGameId = null;
 
+const RESULT_LETTERS = { win: 'W', draw: 'D', loss: 'L' };
+
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
-  statusEl.style.color = isError ? '#b00020' : '';
-}
-
-async function getJson(url) {
-  const response = await fetch(url);
-  if (response.status === 404) throw new Error('Chess.com username was not found.');
-  if (!response.ok) throw new Error(`Chess.com request failed (${response.status}).`);
-  return response.json();
+  statusEl.classList.toggle('error', isError);
 }
 
 function username() {
   return usernameInput.value.trim().toLowerCase();
-}
-
-async function fetchArchives() {
-  const data = await getJson(`${CHESS_API}/${encodeURIComponent(username())}/games/archives`);
-  // Newest month first.
-  return (data.archives || []).slice().reverse();
-}
-
-async function fetchGames(archiveUrl) {
-  const data = await getJson(archiveUrl);
-  // Newest game first.
-  return (data.games || []).sort((a, b) => (b.end_time || 0) - (a.end_time || 0));
-}
-
-function monthLabel(archiveUrl) {
-  const [year, month] = archiveUrl.split('/').slice(-2);
-  return new Date(Number(year), Number(month) - 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
-}
-
-function describe(game) {
-  const me = username();
-  const isWhite = game.white.username.toLowerCase() === me;
-  const mine = isWhite ? game.white : game.black;
-  const opponent = isWhite ? game.black : game.white;
-  let outcome = 'loss';
-  if (mine.result === 'win') outcome = 'win';
-  else if (DRAW_RESULTS.has(mine.result)) outcome = 'draw';
-  return { isWhite, opponent, outcome };
 }
 
 async function importToLichess(game) {
@@ -69,7 +36,7 @@ async function importToLichess(game) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.url) throw new Error(data.error || `Lichess import failed (${response.status}).`);
   // Show the board from your side.
-  const { isWhite } = describe(game);
+  const { isWhite } = describe(game, username());
   return isWhite ? data.url : `${data.url}/black`;
 }
 
@@ -95,28 +62,35 @@ function renderGames(games) {
   }
   setStatus('');
   for (const game of games) {
-    const { opponent, outcome, isWhite } = describe(game);
+    const { opponent, outcome, isWhite } = describe(game, username());
     const li = document.createElement('li');
 
+    const result = document.createElement('div');
+    result.className = 'result';
+    result.style.setProperty('--swatch', `var(--${outcome})`);
+    result.textContent = RESULT_LETTERS[outcome];
+    result.title = outcome === 'win' ? 'Won' : outcome === 'loss' ? 'Lost' : 'Drawn';
+
     const info = document.createElement('div');
-    info.className = 'info';
+    info.style.minWidth = '0';
     const name = document.createElement('div');
     name.className = 'opponent';
-    name.textContent = `vs ${opponent.username} (${opponent.rating})`;
+    const rating = document.createElement('span');
+    rating.className = 'rating';
+    rating.textContent = opponent.rating;
+    name.append(`vs ${opponent.username}`, rating);
     const meta = document.createElement('div');
     meta.className = 'meta';
-    const result = document.createElement('span');
-    result.className = outcome;
-    result.textContent = outcome.toUpperCase();
-    const date = new Date(game.end_time * 1000).toLocaleDateString();
-    meta.append(result, ` · ${isWhite ? 'White' : 'Black'} · ${game.time_class} · ${date}`);
+    const date = new Date(game.end_time * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    meta.textContent = `${isWhite ? 'White' : 'Black'} · ${game.time_class} · ${date}`;
     info.append(name, meta);
 
     const button = document.createElement('button');
+    button.className = 'text-btn';
     button.textContent = 'Analyze';
     button.addEventListener('click', () => analyze(game, button));
 
-    li.append(info, button);
+    li.append(result, info, button);
     gamesList.append(li);
   }
 }
@@ -139,7 +113,7 @@ async function load() {
   loadBtn.disabled = true;
   setStatus('Loading…');
   try {
-    archives = await fetchArchives();
+    archives = await fetchArchives(username());
     await chrome.storage.local.set({ chessUsername: usernameInput.value.trim() });
     monthSelect.replaceChildren(...archives.map((url) => new Option(monthLabel(url), url)));
     monthSelect.disabled = !archives.length;
@@ -187,6 +161,10 @@ loadBtn.addEventListener('click', load);
 usernameInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') load(); });
 monthSelect.addEventListener('change', () => showMonth(monthSelect.value));
 currentGameBtn.addEventListener('click', analyzeCurrentTabGame);
+statsBtn.addEventListener('click', async () => {
+  if (username()) await chrome.storage.local.set({ chessUsername: usernameInput.value.trim() });
+  chrome.tabs.create({ url: chrome.runtime.getURL('stats.html') });
+});
 
 (async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

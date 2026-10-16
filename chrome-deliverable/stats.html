@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess Stats</title>
+  <link rel="icon" href="icons/icon32.png">
+  <style>
+    /* Editorial stats page in the spirit of Letterboxd's year-in-review: dark slate,
+       serif headlines, letter-spaced section labels, ranked lists, prose between stats. */
+    @font-face {
+      font-family: "Newsreader";
+      src: url("fonts/newsreader.woff2") format("woff2");
+      font-weight: 200 800;
+      font-display: swap;
+    }
+    :root {
+      color-scheme: dark;
+      --bg: #14181c;
+      --raised: #1c2228;
+      --rule: #2c3440;
+      --text: #99aabb;
+      --bright: #ffffff;
+      --muted: #678;
+      --accent: #00e054; /* UI only: active filters, links */
+      --win: #2b9bd1;
+      --draw: #5d6874;
+      --loss: #e06f00;
+      --error: #ff6b6b;
+      --serif: "Newsreader", Georgia, "Times New Roman", serif;
+      --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 var(--sans); }
+    main { max-width: 940px; margin: 0 auto; padding: 0 16px 80px; }
+    button, input { font: inherit; color: inherit; }
+    button { background: none; border: 0; padding: 0; cursor: pointer; }
+
+    /* Top bar */
+    .topbar { display: flex; align-items: center; gap: 10px; padding: 18px 0; border-bottom: 1px solid var(--rule); }
+    .topbar img { width: 22px; height: 22px; image-rendering: pixelated; }
+    .topbar .brand { flex: 1; font-size: 13px; color: var(--muted); letter-spacing: .02em; }
+    .topbar form { display: flex; gap: 6px; }
+    .topbar input { width: 170px; padding: 6px 10px; background: var(--raised); border: 1px solid var(--rule); border-radius: 4px; font-size: 13px; }
+    .topbar input:focus { outline: none; border-color: var(--muted); }
+    .topbar form button { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--bright); padding: 6px 12px; background: var(--rule); border-radius: 4px; }
+    .topbar form button:hover { background: #3b4553; }
+
+    /* Profile hero */
+    .hero { display: flex; align-items: center; gap: 24px; padding: 48px 0 28px; }
+    .avatar { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; background: var(--raised); flex: none; }
+    .avatar.pixel { image-rendering: pixelated; border-radius: 12px; }
+    .hero h1 { font: 500 44px/1.05 var(--serif); color: var(--bright); margin: 0; letter-spacing: -.01em; }
+    .hero .title-badge { display: inline-block; vertical-align: 10px; margin-right: 10px; padding: 2px 6px; border-radius: 3px; background: #7c2929; color: #fff; font: 700 13px/1.3 var(--sans); letter-spacing: .04em; }
+    .hero .meta { margin-top: 8px; font-size: 14px; }
+    .hero .meta b { color: var(--bright); font-weight: 600; }
+    .hero .meta span + span::before { content: "·"; margin: 0 8px; color: var(--muted); }
+
+    /* Filters as quiet text tabs */
+    .filters { display: flex; flex-wrap: wrap; gap: 8px 36px; padding-bottom: 14px; border-bottom: 1px solid var(--rule); }
+    .tabs { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+    .tabs button { font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 4px 0; border-bottom: 2px solid transparent; }
+    .tabs button:hover { color: var(--text); }
+    .tabs button[aria-pressed="true"] { color: var(--bright); border-bottom-color: var(--accent); }
+
+    #status { min-height: 22px; margin: 14px 0 0; font-size: 13px; color: var(--muted); }
+    #status.error { color: var(--error); }
+
+    /* Big numbers */
+    .numbers { display: grid; grid-template-columns: repeat(4, 1fr); margin: 28px 0 0; }
+    .number { padding: 4px 20px; border-left: 1px solid var(--rule); }
+    .number:first-child { padding-left: 0; border-left: 0; }
+    .number .value { font: 500 52px/1 var(--serif); color: var(--bright); }
+    .number .label { margin-top: 8px; font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+    .lede { font: 400 21px/1.5 var(--serif); color: var(--text); margin: 32px 0 0; max-width: 720px; }
+    .lede b, .prose b { color: var(--bright); font-weight: 600; }
+
+    /* Sections */
+    section { margin-top: 64px; }
+    .section-head { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; }
+    .section-head h2 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--text); white-space: nowrap; }
+    .section-head .line { flex: 1; height: 1px; background: var(--rule); }
+    .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; background: var(--swatch); }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+    .prose { font: 400 18px/1.5 var(--serif); margin: 24px 0 0; max-width: 680px; }
+    h3 { font: 500 24px/1.2 var(--serif); color: var(--bright); margin: 0 0 4px; }
+    .sub { font-size: 13px; color: var(--muted); margin: 0 0 16px; }
+
+    /* Win/draw/loss bar: 2px gaps, rounded ends */
+    .rbar { display: flex; gap: 2px; height: 6px; }
+    .rbar.thick { height: 10px; }
+    .rbar div { min-width: 2px; }
+    .rbar div:first-child { border-radius: 3px 0 0 3px; }
+    .rbar div:last-child { border-radius: 0 3px 3px 0; }
+    .rbar div:only-child { border-radius: 3px; }
+    .seg-win { background: var(--win); } .seg-draw { background: var(--draw); } .seg-loss { background: var(--loss); }
+
+    /* White & Black */
+    .side .big { font: 500 64px/1 var(--serif); color: var(--bright); margin: 6px 0 14px; }
+    .side .big small { font: 600 11px var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--text); margin-left: 8px; vertical-align: 14px; }
+    .side .record { margin-top: 10px; font-size: 13px; }
+
+    /* Ranked opening lists */
+    ol.ranked { list-style: none; margin: 0; padding: 0; }
+    .rank-row { display: grid; grid-template-columns: 34px 1fr 84px 44px; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--rule); cursor: pointer; }
+    .rank-row:hover .name { color: var(--accent); }
+    .rank-row .rank { font: 400 22px/1 var(--serif); color: var(--muted); }
+    .rank-row .name { color: var(--bright); font-weight: 500; line-height: 1.3; }
+    .rank-row .count { font-size: 12px; color: var(--muted); }
+    .rank-row .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--bright); }
+    .rank-row .pct.few { color: var(--muted); }
+    .variations { list-style: none; margin: 0 0 8px 46px; padding: 0; }
+    .variations li { display: grid; grid-template-columns: 1fr 84px 44px; gap: 12px; align-items: center; padding: 5px 0; font-size: 13px; }
+    .variations .count { color: var(--muted); }
+    .variations .pct { text-align: right; font-variant-numeric: tabular-nums; }
+    .link { margin-top: 14px; font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+    .link:hover { color: var(--accent); }
+    .empty { color: var(--muted); padding: 12px 0; }
+
+    /* Histograms */
+    /* padding-top keeps room for the label above a bar near 100% */
+    .hist { position: relative; height: 176px; padding-top: 26px; display: flex; gap: 3px; align-items: flex-end; border-bottom: 1px solid var(--rule); margin-top: 8px; }
+    .hist .slot { flex: 1; height: 100%; display: flex; align-items: flex-end; justify-content: center; position: relative; }
+    .hist .slot:hover .bar { filter: brightness(1.25); }
+    .hist .bar { width: 100%; max-width: 40px; background: #3b4553; border-radius: 3px 3px 0 0; }
+    .hist .bar.top { background: var(--win); }
+    .hist .bar.few { background: repeating-linear-gradient(135deg, #3b4553 0 3px, transparent 3px 6px); }
+    .hist .cap { position: absolute; transform: translateY(-100%); padding-bottom: 4px; font: 500 15px var(--serif); color: var(--bright); }
+    .hist-labels { display: flex; gap: 3px; }
+    .hist-labels span { flex: 1; text-align: center; font-size: 11px; color: var(--muted); padding-top: 6px; }
+    .note { font-size: 12px; color: var(--muted); margin-top: 12px; }
+    details { margin-top: 10px; font-size: 12px; }
+    summary { cursor: pointer; color: var(--muted); }
+    summary:hover { color: var(--text); }
+    table { width: 100%; border-collapse: collapse; margin-top: 6px; font-variant-numeric: tabular-nums; }
+    th, td { text-align: right; padding: 4px 0; border-bottom: 1px solid var(--rule); }
+    th { color: var(--muted); font-weight: 600; }
+    th:first-child, td:first-child { text-align: left; }
+
+    /* Tilt */
+    .tilt-row { display: grid; grid-template-columns: 120px 1fr 60px; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--rule); }
+    .tilt-row .label { color: var(--bright); }
+    .tilt-row .pct { font: 500 26px/1 var(--serif); color: var(--bright); text-align: right; }
+
+    footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 12px; color: var(--muted); }
+
+    #tooltip { position: fixed; z-index: 10; display: none; pointer-events: none; white-space: pre-line; max-width: 260px;
+      background: #445566; color: #fff; font-size: 12px; line-height: 1.45; padding: 7px 10px; border-radius: 4px; }
+
+    @media (max-width: 720px) {
+      .hero { flex-direction: column; align-items: flex-start; gap: 16px; padding-top: 32px; }
+      .hero h1 { font-size: 34px; }
+      .numbers { grid-template-columns: 1fr 1fr; row-gap: 24px; }
+      .number:nth-child(3) { padding-left: 0; border-left: 0; }
+      .number .value { font-size: 40px; }
+      .two { grid-template-columns: 1fr; gap: 40px; }
+      .topbar input { width: 130px; }
+      .section-head .legend { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topbar">
+      <img src="icons/icon32.png" alt="">
+      <div class="brand">chess.com → Lichess · Stats</div>
+      <form id="userForm">
+        <input id="username" placeholder="Chess.com username" aria-label="Chess.com username" autocomplete="username">
+        <button type="submit">Go</button>
+      </form>
+    </div>
+
+    <div class="hero" id="hero" hidden></div>
+
+    <div class="filters">
+      <div class="tabs" id="rangeFilter" aria-label="Time range">
+        <button data-value="1">This month</button>
+        <button data-value="3" aria-pressed="true">3 months</button>
+        <button data-value="12">12 months</button>
+        <button data-value="all">All time</button>
+      </div>
+      <div class="tabs" id="classFilter" aria-label="Time control">
+        <button data-value="all" aria-pressed="true">All games</button>
+        <button data-value="bullet">Bullet</button>
+        <button data-value="blitz">Blitz</button>
+        <button data-value="rapid">Rapid</button>
+        <button data-value="daily">Daily</button>
+      </div>
+    </div>
+
+    <p id="status" role="status"></p>
+    <div id="dashboard"></div>
+
+    <footer>Games from Chess.com's public data. Hover over any bar for the full record.</footer>
+  </main>
+  <div id="tooltip" role="tooltip"></div>
+  <script src="chesscom.js"></script>
+  <script src="stats-calc.js"></script>
+  <script src="stats.js"></script>
+</body>
+</html>
